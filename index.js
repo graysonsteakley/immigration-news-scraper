@@ -7,11 +7,10 @@ const url = require("url");
 const app = express();
 
 app.get("/", (_, res) => {
-  console.log("test");
   res.json("Welcome to my news scrapper API!");
 });
 
-const articles = [];
+let articles = [];
 const newspapers = [
   {
     name: "boundless",
@@ -37,33 +36,54 @@ const isValidUrl = (urlString) => {
   return !!urlPattern.test(urlString);
 };
 
-newspapers.forEach((np) => {
-  axios
-    .get(np.address)
-    .then((response) => {
-      const html = response.data;
-      const $ = cheerio.load(html);
+app.get("/news", async (_, res) => {
+  await axios
+    .all(
+      newspapers.map((np) =>
+        axios.get(np.address, {
+          params: {
+            np,
+          },
+        })
+      )
+    )
+    .then(
+      axios.spread((...allData) => {
+        allData.forEach((response) => {
+          handleScrape(response, response.config.params.np);
+        });
+      })
+    );
 
-      $('a:contains("Immigration")', html).each(function () {
-        const title = $(this).text();
-        let formattedURL = $(this).attr("href");
-        if (!isValidUrl(formattedURL)) {
-          const parsedURL = url.parse(response.config.url);
-          formattedURL =
-            parsedURL.protocol + "//" + parsedURL.host + formattedURL;
-          if (!isValidUrl(formattedURL)) return;
-        }
-
-        articles.push({ title, url: formattedURL, source: np.address });
-      });
-    })
-    .catch((e) => console.error(e));
+  res.json(articles);
 });
 
-app.get("/news", (_, res) => {
+app.get("/news/:newspaperId", async (req, res) => {
+  articles = [];
+  const title = req.params.newspaperId;
+  const newspaper = newspapers.find((news) => news.name === title);
+  await axios.get(newspaper.address).then((response) => {
+    handleScrape(response, newspaper);
+  });
   res.json(articles);
 });
 
 app.listen(PORT, () => {
   console.log(`server running on port ${PORT}`);
 });
+
+const handleScrape = (response, np) => {
+  const html = response.data;
+  const $ = cheerio.load(html);
+
+  $('a:contains("Immigration")', html).each(function () {
+    const title = $(this).text();
+    let formattedURL = $(this).attr("href");
+    if (!isValidUrl(formattedURL)) {
+      const parsedURL = url.parse(response.config.url);
+      formattedURL = parsedURL.protocol + "//" + parsedURL.host + formattedURL;
+      if (!isValidUrl(formattedURL)) return;
+    }
+    articles.push({ title, url: formattedURL, source: np.address });
+  });
+};
